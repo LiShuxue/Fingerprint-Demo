@@ -1,17 +1,19 @@
 package com.example.myapplication;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.biometric.BiometricPrompt;
 
 import android.app.AlertDialog;
 import android.content.DialogInterface;
 import android.hardware.fingerprint.FingerprintManager;
 import android.os.Bundle;
-import android.os.CancellationSignal;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyPermanentlyInvalidatedException;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
+import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 
@@ -24,6 +26,8 @@ import java.security.NoSuchAlgorithmException;
 import java.security.NoSuchProviderException;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
@@ -39,7 +43,6 @@ public class MainActivity extends AppCompatActivity {
     private FingerprintManager fingerprintManager;
     private boolean isHardwareSupport = false;
     private boolean hasEnrolledFingerprints = false;
-    private CancellationSignal cancellationSignal;
 
     private AlertDialog.Builder builder;
     private AlertDialog dialog;
@@ -47,6 +50,10 @@ public class MainActivity extends AppCompatActivity {
     private KeyStore keyStore;
     private KeyGenerator keyGenerator;
     private Cipher cipher;
+
+    private BiometricPrompt biometricPrompt;
+    private BiometricPrompt.CryptoObject cryptoObject;
+    private BiometricPrompt.PromptInfo promptInfo;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -56,14 +63,15 @@ public class MainActivity extends AppCompatActivity {
         // 初始化控件
         check_btn = findViewById(R.id.check_button);
         auth_btn = findViewById(R.id.authenticate_button);
-        // 初始化fingerprintManager实例
-        fingerprintManager = getSystemService(FingerprintManager.class);
 
-        // 初始化FingerprintManager, KeyStore, KeyGenerator, Cipher实例
+        // 初始化KeyStore, KeyGenerator, Cipher实例
         initSecureInstance();
 
         // 生成密钥并存入KeyStore，如果密钥之前已经存在，则直接返回
         initKey();
+
+        // 初始化指纹相关
+        initBiometric();
 
         check_btn.setOnClickListener(new View.OnClickListener(){
             @Override
@@ -78,6 +86,55 @@ public class MainActivity extends AppCompatActivity {
                 fingerprintAuthenticate();
             }
         });
+    }
+
+    private void initBiometric() {
+        // 初始化fingerprintManager实例
+        fingerprintManager = getSystemService(FingerprintManager.class);
+
+        // 初始化biometricPrompt
+        Executor newExecutor = Executors.newSingleThreadExecutor();
+        biometricPrompt = new BiometricPrompt(this, newExecutor, new BiometricPrompt.AuthenticationCallback() {
+            @Override
+            public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
+                super.onAuthenticationSucceeded(result);
+                try {
+                    // 在扫描成功之后，再加密某些字段传到服务器验证，如果成功，表示这次操作真正的成功了。
+                    byte[] encrypted = result.getCryptoObject().getCipher().doFinal("test-scret-msg".getBytes());
+                    String secretStr = Base64.encodeToString(encrypted, 0);
+
+                    // 省略将 "secretStr" 传到服务器
+                    // ...
+                    Log.d("DEBUG","onAuthenticationSucceeded");
+                } catch (BadPaddingException | IllegalBlockSizeException e) {
+                    Log.d("DEBUG","fingerprint success but encrypt error, so it is failed");
+                }
+                // 取消指纹监听
+                cancelFingerprintListenner();
+            }
+
+            @Override
+            public void onAuthenticationFailed() {
+                super.onAuthenticationFailed();
+                Log.d("DEBUG","onAuthenticationFailed, please try again");
+            }
+
+            @Override
+            public void onAuthenticationError(int errorCode, CharSequence errString) {
+                super.onAuthenticationError(errorCode, errString);
+                Log.d("DEBUG","onAuthenticationError");
+                // 取消指纹监听
+                cancelFingerprintListenner();
+            }
+        });
+
+        cryptoObject = new BiometricPrompt.CryptoObject(cipher);
+        promptInfo = new BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Title")
+                .setSubtitle("Subtitle")
+                .setDescription("This is the description")
+                .setNegativeButtonText("Cancel")
+                .build();
     }
 
     private void initSecureInstance() {
@@ -172,52 +229,14 @@ public class MainActivity extends AppCompatActivity {
     private void fingerprintAuthenticate() {
         // 我们每次使用 crypto 对象之前都需要init cipher， 因为cipher对象只能doFinal一次。
         if (initCipher()) {
-            showDialog("please confirm your fingerprint", null, null);
-
-            FingerprintManager.CryptoObject cryptoObject = new FingerprintManager.CryptoObject(cipher);
-            cancellationSignal = new CancellationSignal();
             /**
-             * 第一个参数可以是一个crypto对象，或者是null
+             * 第一个参数是系统提供的弹出框
+             *
+             * 第二个参数可以是一个crypto对象，或者是null
              * 如果是null，表示只用了本机的指纹校验，但是从理论上来说，设备的指纹扫描结果是可以被拦截和篡改的。所以，对于应用或者应用的服务端来说，并不是绝对安全的。
              * 所以，可以传入一个crypto对象。在扫描成功之后，再加密某些字段传到服务器验证，如果成功，表示这次操作真正的成功了。
              */
-            fingerprintManager.authenticate(cryptoObject, cancellationSignal, 0, new FingerprintManager.AuthenticationCallback() {
-                @Override
-                public void onAuthenticationSucceeded(FingerprintManager.AuthenticationResult result) {
-                    super.onAuthenticationSucceeded(result);
-
-                    try {
-                        // 在扫描成功之后，再加密某些字段传到服务器验证，如果成功，表示这次操作真正的成功了。
-                        byte[] encrypted = result.getCryptoObject().getCipher().doFinal("test-scret-msg".getBytes());
-                        String secretStr = Base64.encodeToString(encrypted, 0);
-
-                        // 省略将 "secretStr" 传到服务器
-                        // ...
-
-                        showDialog("onAuthenticationSucceeded", null, null);
-                    } catch (BadPaddingException | IllegalBlockSizeException e) {
-                        showDialog("fingerprint success but encrypt error, so it is failed", null, null);
-                    }
-                    // 取消指纹监听
-                    cancelFingerprintListenner();
-                }
-
-                @Override
-                public void onAuthenticationFailed() {
-                    super.onAuthenticationFailed();
-                    // 指纹验证失败的时候，应该重新触摸指纹去验证，而不能重新调用fingerprintManager.authenticate(...)方法
-                    // 也可以调用cancel方法取消指纹操作，此时会进入onAuthenticationError回调。
-                    showDialog("onAuthenticationFailed, please try again", null, null);
-                }
-
-                @Override
-                public void onAuthenticationError(int errorCode, CharSequence errString) {
-                    super.onAuthenticationError(errorCode, errString);
-                    showDialog("onAuthenticationError", null, null);
-                    // 取消指纹监听
-                    cancelFingerprintListenner();
-                }
-            }, null);
+            biometricPrompt.authenticate(promptInfo, cryptoObject);
         } else {
             String msg = "You have enrolled the new fingerprint or changed the device setting about screen lock, the key is invalidate now. Do you want re-generate the key ?";
             showDialog(msg, new DialogInterface.OnClickListener() {
@@ -259,10 +278,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void cancelFingerprintListenner() {
-        if (cancellationSignal != null) {
-            cancellationSignal.cancel();
-            cancellationSignal = null;
-        }
+        biometricPrompt.cancelAuthentication();
     }
     @Override
     protected void onPause() {
