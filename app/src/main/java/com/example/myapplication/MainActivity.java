@@ -59,7 +59,7 @@ public class MainActivity extends AppCompatActivity {
         // 初始化fingerprintManager实例
         fingerprintManager = getSystemService(FingerprintManager.class);
 
-        // 初始化FingerprintManager, KeyStore, KeyGenerator, Cipher实例
+        // 初始化KeyStore, KeyGenerator, Cipher实例
         initSecureInstance();
 
         // 生成密钥并存入KeyStore，如果密钥之前已经存在，则直接返回
