@@ -1,3 +1,8 @@
 <resources>
     <string name="app_name">Fingerprint Demo</string>
+    <string name="fingerprint_description">Use Fingerprint for login</string>
+    <string name="description_fingerprint_icon">Fingerprint icon</string>
+    <string name="fingerprint_hint">Touch sensor</string>
+    <string name="fingerprint_cancel">Cancel</string>
+    <string name="fingerprint_fragment_title">Fingerprint Authentication</string>
 </resources>
