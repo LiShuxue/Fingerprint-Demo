@@ -40,10 +40,18 @@ public class FingerprintManagerUtil {
 
 
     public static boolean canAuthenticate() {
-        // 需要权限 <uses-permission android:name="android.permission.USE_FINGERPRINT" />
+        // need permission <uses-permission android:name="android.permission.USE_FINGERPRINT" />
         if (Build.VERSION.SDK_INT >= 23) {
-            isHardwareSupport = fingerprintManager.isHardwareDetected();
-            hasEnrolledFingerprints = fingerprintManager.hasEnrolledFingerprints();
+            if (fingerprintManager == null) {
+                return false;
+            }
+            try {
+                isHardwareSupport = fingerprintManager.isHardwareDetected();
+                hasEnrolledFingerprints = fingerprintManager.hasEnrolledFingerprints();
+            } catch (Exception e) {
+                Log.e("ERROR", "Failed to init fingerprint" + e.toString());
+                return false;
+            }
         }
         return isHardwareSupport && hasEnrolledFingerprints;
     }
@@ -71,7 +79,7 @@ public class FingerprintManagerUtil {
                         // 省略将 "secretStr" 传到服务器
                         // ...
 
-                        callback.onAuthenticated("onAuthenticationSucceeded");
+                        callback.onAuthenticated("Fingerprint recognized");
                     } catch (BadPaddingException | IllegalBlockSizeException e) {
                         Log.d("DEBUG", "fingerprint success but encrypt error, so it is failed");
                     }
@@ -82,7 +90,7 @@ public class FingerprintManagerUtil {
                     super.onAuthenticationFailed();
                     // 指纹验证失败的时候，应该重新触摸指纹去验证，而不能重新调用fingerprintManager.authenticate(...)方法
                     // 也可以调用cancel方法取消指纹操作，此时会进入onAuthenticationError回调。
-                    callback.onFailed("onAuthenticationFailed, please try again");
+                    callback.onFailed("Fingerprint not recognized. Try again");
                 }
 
                 @Override
@@ -116,21 +124,24 @@ public class FingerprintManagerUtil {
                 // 初始化keystore对象（keystore提供商）
                 keyStore = KeyStore.getInstance("AndroidKeyStore");
             } catch (KeyStoreException e) {
-                throw new RuntimeException("Failed to get an instance of KeyStore", e);
+                // throw new RuntimeException("Failed to get an instance of KeyStore", e);
+                Log.e("ERROR", "Failed to get an instance of KeyStore" + e.toString());
             }
 
             try {
                 // 初始化密钥生成器（算法，keystore提供商）
                 keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
             } catch (NoSuchAlgorithmException | NoSuchProviderException e) {
-                throw new RuntimeException("Failed to get an instance of KeyGenerator", e);
+                // throw new RuntimeException("Failed to get an instance of KeyGenerator", e);
+                Log.e("ERROR", "Failed to get an instance of KeyGenerator" + e.toString());
             }
 
             try {
                 // 构建加密/解密类对象 （算法/加密模式/填充方式）
                 cipher = Cipher.getInstance(KeyProperties.KEY_ALGORITHM_AES + "/" + KeyProperties.BLOCK_MODE_CBC + "/" + KeyProperties.ENCRYPTION_PADDING_PKCS7);
             } catch (NoSuchAlgorithmException | NoSuchPaddingException e) {
-                throw new RuntimeException("Failed to get an instance of Cipher", e);
+                // throw new RuntimeException("Failed to get an instance of Cipher", e);
+                Log.e("ERROR", "Failed to get an instance of Cipher" + e.toString());
             }
         }
     }
@@ -171,7 +182,8 @@ public class FingerprintManagerUtil {
                 keyGenerator.init(builder.build());
                 keyGenerator.generateKey(); // 生成密钥，密钥会存在KeyStore中
             } catch (NoSuchAlgorithmException | InvalidAlgorithmParameterException | CertificateException | UnrecoverableKeyException | KeyStoreException | IOException e) {
-                throw new RuntimeException(e);
+                // throw new RuntimeException(e);
+                Log.e("ERROR", "Failed to init key" + e.toString());
             }
         }
     }
@@ -195,9 +207,11 @@ public class FingerprintManagerUtil {
                 return true;
             } catch (KeyPermanentlyInvalidatedException e) {
                 // 出现了上述情况
+                Log.e("ERROR", "Failed to init Cipher" + e.toString());
                 return false;
             } catch (KeyStoreException | CertificateException | UnrecoverableKeyException | IOException | NoSuchAlgorithmException | InvalidKeyException e) {
-                throw new RuntimeException("Failed to init Cipher", e);
+                Log.e("ERROR", "Failed to init Cipher" + e.toString());
+                return false;
             }
         } else {
             return true;
